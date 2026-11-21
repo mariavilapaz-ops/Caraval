@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=overlays-content">
+  <meta name="theme-color" content="#100d16">
+  <title>Caraval — Juego interactivo</title>
+  <style>
+    :root { color-scheme: dark; --app-bg: #100d16; --fade-duration: 450ms; }
+    * { box-sizing: border-box; }
+    html, body {
+      position: fixed; inset: 0; width: 100%; height: 100%; margin: 0;
+      overflow: hidden; overscroll-behavior: none; background: var(--app-bg);
+    }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+    }
+    #game-shell {
+      position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh;
+      overflow: hidden; background: var(--app-bg);
+    }
+    #stage {
+      position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden;
+      background: var(--app-bg); touch-action: manipulation;
+    }
+    #stage > svg {
+      position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+      opacity: 0; pointer-events: none; will-change: opacity;
+      transition: opacity var(--fade-duration) ease-out;
+    }
+    #stage > svg.is-active { opacity: 1; pointer-events: auto; }
+    #stage > svg.is-leaving { opacity: 0; pointer-events: none !important; }
+    .game-hit-target { cursor: pointer !important; touch-action: manipulation; }
+
+    #floating-controls {
+      position: fixed; inset: 0 auto auto 0; width: 100vw; height: 100vh;
+      height: 100dvh; z-index: 100; pointer-events: none; overflow: visible;
+    }
+    #floating-controls[hidden] { display: none; }
+    #floating-controls svg {
+      position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+      overflow: visible; pointer-events: none;
+    }
+    #floating-controls svg .floating-control-layer {
+      pointer-events: all; cursor: pointer; touch-action: manipulation;
+    }
+    #floating-answer {
+      position: absolute; z-index: 2; display: block; margin: 0; padding: 0 2px;
+      min-width: 0; border: 0; border-radius: 0; outline: none; box-shadow: none;
+      background: transparent; color: #24172a; caret-color: #24172a;
+      font-family: Georgia, "Times New Roman", serif; font-weight: 600;
+      text-align: center; text-transform: uppercase; line-height: 1; font-size: 16px;
+      appearance: none; -webkit-appearance: none; -webkit-tap-highlight-color: transparent;
+      pointer-events: auto; touch-action: manipulation;
+    }
+    #floating-answer:focus { background: transparent; border: 0; outline: none; box-shadow: none; }
+
+    #initial-loader {
+      position: fixed;
+      z-index: 90;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      color: rgba(255,255,255,.72);
+      background: rgba(16,13,22,.48);
+      font: 12px/1.2 system-ui, sans-serif;
+      letter-spacing: .02em;
+      pointer-events: none;
+      transition: opacity 120ms ease-out;
+    }
+    #initial-loader.hidden {
+      opacity: 0;
+      visibility: hidden;
+    }
+    .loader-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: rgba(255,255,255,.75);
+      animation: loader-pulse 900ms ease-in-out infinite alternate;
+    }
+    @keyframes loader-pulse {
+      from { opacity: .35; transform: scale(.8); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    #status-message {
+      position: fixed; z-index: 150; left: 50%;
+      bottom: max(14px, env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%); max-width: min(92vw, 420px); padding: 9px 14px;
+      border-radius: 999px; background: rgba(20, 15, 27, .9); color: #fff;
+      font: 500 13px/1.35 system-ui, sans-serif; text-align: center;
+      pointer-events: none; opacity: 0; transition: opacity 160ms ease-out;
+    }
+    #status-message.visible { opacity: 1; }
+
+    #error-panel {
+      position: fixed; z-index: 200; inset: 0; display: none;
+      align-items: center; justify-content: center; padding: 28px;
+      background: #100d16; color: #fff; text-align: center;
+    }
+    #error-panel.visible { display: flex; }
+    #error-panel section {
+      width: min(100%, 520px); padding: 26px;
+      border: 1px solid rgba(255,255,255,.18); border-radius: 14px;
+      background: rgba(255,255,255,.04);
+    }
+    #error-panel h1 { margin: 0 0 12px; font: 600 22px/1.2 Georgia, serif; }
+    #error-panel p { margin: 10px 0; color: rgba(255,255,255,.82); font: 14px/1.55 system-ui, sans-serif; }
+    #error-panel code { color: #f1d8aa; overflow-wrap: anywhere; }
+    #retry-button {
+      margin-top: 12px; padding: 11px 18px; border: 1px solid rgba(255,255,255,.35);
+      border-radius: 999px; background: transparent; color: white; font: inherit; cursor: pointer;
+    }
+    #stage.shake { animation: gentle-shake 340ms ease-in-out; }
+    @keyframes gentle-shake {
+      0%, 100% { transform: translateX(0); }
+      18% { transform: translateX(-4px); }
+      36% { transform: translateX(4px); }
+      54% { transform: translateX(-2.5px); }
+      72% { transform: translateX(2.5px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #stage > svg, #status-message { transition-duration: 1ms; }
+      #stage.shake { animation-duration: 1ms; }
+    }
+  </style>
+</head>
+<body>
+  <main id="game-shell" aria-label="Juego interactivo">
+    <div id="stage" aria-live="off"></div>
+  </main>
+
+  <div id="floating-controls" hidden aria-label="Controles de respuesta">
+    <svg id="floating-svg" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+    <input id="floating-answer" type="text" inputmode="text" enterkeyhint="done"
+      autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12"
+      aria-label="Escribe la letra de la pista">
+  </div>
+
+  <div id="initial-loader" role="status" aria-live="polite">
+    <span class="loader-dot" aria-hidden="true"></span>
+    <span>Cargando…</span>
+  </div>
+  <div id="status-message" role="status" aria-live="polite"></div>
+  <div id="error-panel" role="alert">
+    <section>
+      <h1>No se pudieron cargar las pantallas</h1>
+      <p id="error-description"></p>
+      <p>Comprueba que <code>index.html</code> y los archivos SVG estén en la misma carpeta y abre el juego desde un servidor local.</p>
+      <p>En esa carpeta puedes ejecutar <code>python3 -m http.server 8000</code> y visitar <code>http://localhost:8000</code>.</p>
+      <button id="retry-button" type="button">Volver a intentar</button>
+    </section>
+  </div>
+
+  <script>
+  (() => {
+    "use strict";
+
+    const TOTAL_SCREENS = 14;
+    const FADE_MS = 450;
+    const AUTO_ADVANCE = new Map([[1, 2000], [2, 2000], [11, 3000], [12, 7000]]);
+    const EXPECTED_LETTERS = new Map([[5, "L"], [6, "E"], [7, "G"], [8, "E"], [9, "N"], [10, "D"]]);
+
+    const stage = document.getElementById("stage");
+    const floatingControls = document.getElementById("floating-controls");
+    const floatingSvg = document.getElementById("floating-svg");
+    const answerInput = document.getElementById("floating-answer");
+    const statusMessage = document.getElementById("status-message");
+    const errorPanel = document.getElementById("error-panel");
+    const errorDescription = document.getElementById("error-description");
+    const retryButton = document.getElementById("retry-button");
+
+    // Conserva solo las fuentes que están en vuelo o próximas a mostrarse.
+    // Los SVG ya montados viven únicamente en el DOM durante su pantalla/transición.
+    const svgTextCache = new Map();
+    const svgFetches = new Map();
+    const PREFETCH_GAP_MS = 180;
+    let currentScreen = 0;
+    let activeSvg = null;
+    let autoTimer = null;
+    let statusTimer = null;
+    let navigationLock = false;
+    let floatingGroup = null;
+    let originalControlVisibility = [];
+    let floatingBarRect = null;
+    let floatingSendRect = null;
+    let activeAnswerScreen = 0;
+
+    function fileName(number) {
+      return `Pantalla_${number}.svg`;
+    }
+    function showError(message) {
+      const loader = document.getElementById("initial-loader");
+      if (loader) loader.classList.add("hidden");
+      errorDescription.textContent = message;
+      errorPanel.classList.add("visible");
+    }
+    function hideError() { errorPanel.classList.remove("visible"); }
+    function showStatus(message, duration = 1300) {
+      statusMessage.textContent = message;
+      statusMessage.classList.add("visible");
+      clearTimeout(statusTimer);
+      statusTimer = setTimeout(() => statusMessage.classList.remove("visible"), duration);
+    }
+
+    function normalizeIllustratorName(value) {
+      return String(value || "").replace(/_x5f_/gi, "_").replace(/_\d+_?$/g, "")
+        .replace(/\s+/g, "_").toLowerCase();
+    }
+    const NAME_ATTRIBUTES = ["id", "data-name", "data-layer", "data-label",
+      "aria-label", "inkscape:label", "label", "name"];
+    function elementNames(element) {
+      return NAME_ATTRIBUTES.map(attribute => element.getAttribute?.(attribute))
+        .filter(Boolean).map(normalizeIllustratorName);
+    }
+    function findLayer(root, requestedName) {
+      if (!root) return null;
+      const wanted = normalizeIllustratorName(requestedName);
+      const nodes = [];
+      if (root.nodeType === 1) nodes.push(root);
+      nodes.push(...root.querySelectorAll("*"));
+      let found = nodes.find(element => elementNames(element).includes(wanted));
+      if (found) return found;
+      found = nodes.find(element => elementNames(element)
+        .some(name => name.includes(wanted) || wanted.includes(name)));
+      return found || null;
+    }
+    function findLayerInElements(svg, requestedName) {
+      const layer = findLayer(svg, "elementos");
+      return (layer && findLayer(layer, requestedName)) || findLayer(svg, requestedName);
+    }
+
+    function prepareHitArea(element, label) {
+      if (!element) return null;
+      const setHitStyle = node => {
+        node.style.setProperty("cursor", "pointer", "important");
+        node.style.setProperty("touch-action", "manipulation", "important");
+        node.style.setProperty("-webkit-tap-highlight-color", "transparent", "important");
+        node.style.setProperty("pointer-events", "all", "important");
+      };
+      setHitStyle(element);
+      element.classList.add("game-hit-target");
+      element.setAttribute("tabindex", "0");
+      element.setAttribute("role", "button");
+      element.setAttribute("aria-label", label);
+      element.querySelectorAll("*").forEach(setHitStyle);
+
+      if (element.localName === "g" && !element.querySelector(":scope > .__caraval_hit_area")) {
+        try {
+          const b = element.getBBox();
+          if (b.width > 0 && b.height > 0) {
+            const hit = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            hit.setAttribute("class", "__caraval_hit_area");
+            hit.setAttribute("x", b.x); hit.setAttribute("y", b.y);
+            hit.setAttribute("width", b.width); hit.setAttribute("height", b.height);
+            hit.setAttribute("fill", "rgba(0,0,0,0.001)");
+            hit.setAttribute("stroke", "none"); hit.setAttribute("pointer-events", "all");
+            setHitStyle(hit); element.appendChild(hit);
+          }
+        } catch (_) { /* Los descendientes siguen siendo objetivos táctiles. */ }
+      }
+      return element;
+    }
+
+    function bindAction(element, label, action) {
+      const target = prepareHitArea(element, label);
+      if (!target) return false;
+      let lastActivation = 0;
+      const activate = event => {
+        if (!activeSvg || !target.isConnected || !activeSvg.contains(target)) return;
+        const now = Date.now();
+        if (now - lastActivation < 450) return;
+        lastActivation = now;
+        action(event);
+      };
+      target.addEventListener("click", activate);
+      target.addEventListener("pointerup", event => { event.preventDefault(); activate(event); }, { passive: false });
+      target.addEventListener("touchend", event => { event.preventDefault(); activate(event); }, { passive: false });
+      target.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(event); }
+      });
+      target.querySelectorAll("*").forEach(child => child.addEventListener("click", event => {
+        if (event.target === child) activate(event);
+      }));
+      return true;
+    }
+
+    async function getSvgText(number) {
+      if (svgTextCache.has(number)) return svgTextCache.get(number);
+      if (svgFetches.has(number)) return svgFetches.get(number);
+
+      const request = (async () => {
+        const response = await fetch(fileName(number), { cache: "no-cache" });
+        if (!response.ok) throw new Error(`${fileName(number)} respondió con HTTP ${response.status}.`);
+        const source = await response.text();
+        if (!/<svg[\s>]/i.test(source)) throw new Error(`${fileName(number)} no parece ser un SVG válido.`);
+        svgTextCache.set(number, source);
+        return source;
+      })();
+
+      svgFetches.set(number, request);
+      try {
+        return await request;
+      } finally {
+        svgFetches.delete(number);
+      }
+    }
+
+    function prefetchScreen(number) {
+      if (number < 1 || number > TOTAL_SCREENS ||
+          svgTextCache.has(number) || svgFetches.has(number)) return;
+      // La precarga es secundaria: nunca retrasa la pantalla que ya está visible.
+      getSvgText(number).catch(() => {
+        // Si falla la precarga, goToScreen volverá a solicitarla y mostrará el error.
+      });
+    }
+
+    function scheduleNextPrefetch(current) {
+      const next = current + 1;
+      if (next > TOTAL_SCREENS) return;
+      setTimeout(() => prefetchScreen(next), PREFETCH_GAP_MS);
+    }
+
+    function releaseSvgText(number) {
+      svgTextCache.delete(number);
+    }
+    function clearAutoTimer() {
+      if (autoTimer) clearTimeout(autoTimer);
+      autoTimer = null;
+    }
+
+    function restoreOriginalControls() {
+      originalControlVisibility.forEach(({ element, value }) => {
+        if (!element?.isConnected) return;
+        if (value === null) element.style.removeProperty("visibility");
+        else element.style.setProperty("visibility", value);
+      });
+      originalControlVisibility = [];
+    }
+
+    function closeFloatingControls({ blur = true, clearValue = true } = {}) {
+      if (blur && document.activeElement === answerInput) answerInput.blur();
+      floatingControls.hidden = true;
+      floatingSvg.replaceChildren();
+      floatingGroup = null;
+      floatingBarRect = null;
+      floatingSendRect = null;
+      restoreOriginalControls();
+      if (clearValue) answerInput.value = "";
+      activeAnswerScreen = 0;
+    }
+
+    function copySvgDefinitions(sourceSvg) {
+      const nodes = [];
+      sourceSvg.querySelectorAll("defs, style").forEach(node => nodes.push(document.importNode(node, true)));
+      return nodes;
+    }
+
+    function createFloatingControls() {
+      if (!activeSvg) return false;
+      const originalBar = findLayer(activeSvg, "Boton_Barra");
+      const originalSend = findLayer(activeSvg, "Boton_Enviar");
+      if (!originalBar || !originalSend) {
+        showStatus("No se encontraron los controles de respuesta.");
+        return false;
+      }
+
+      closeFloatingControls({ blur: false, clearValue: false });
+      activeAnswerScreen = currentScreen;
+      floatingSvg.setAttribute("viewBox", activeSvg.getAttribute("viewBox") || "0 0 1080 1920");
+      floatingSvg.setAttribute("preserveAspectRatio", activeSvg.getAttribute("preserveAspectRatio") || "xMidYMid meet");
+      if (activeSvg.hasAttribute("style")) floatingSvg.setAttribute("style", activeSvg.getAttribute("style"));
+      floatingSvg.replaceChildren(...copySvgDefinitions(activeSvg));
+
+      floatingGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      floatingGroup.setAttribute("id", "floating-control-projection");
+      const clonedBar = document.importNode(originalBar, true);
+      const clonedSend = document.importNode(originalSend, true);
+      clonedBar.classList.add("floating-control-layer");
+      clonedSend.classList.add("floating-control-layer");
+      clonedBar.style.setProperty("pointer-events", "all", "important");
+      clonedSend.style.setProperty("pointer-events", "all", "important");
+      floatingGroup.append(clonedBar, clonedSend);
+      floatingSvg.appendChild(floatingGroup);
+
+      [originalBar, originalSend].forEach(element => {
+        originalControlVisibility.push({
+          element, value: element.style.getPropertyValue("visibility") || null
+        });
+        element.style.setProperty("visibility", "hidden", "important");
+      });
+
+      floatingControls.hidden = false;
+      floatingBarRect = originalBar.getBoundingClientRect();
+      floatingSendRect = originalSend.getBoundingClientRect();
+
+      const sendAction = event => {
+        event.preventDefault?.(); event.stopPropagation?.(); submitAnswer();
+      };
+      const focusAction = event => {
+        event.preventDefault?.(); event.stopPropagation?.();
+        answerInput.focus({ preventScroll: true });
+      };
+      clonedSend.addEventListener("click", sendAction);
+      clonedSend.addEventListener("pointerup", sendAction, { passive: false });
+      clonedSend.addEventListener("touchend", sendAction, { passive: false });
+      clonedSend.addEventListener("pointerdown", event => event.preventDefault());
+      clonedSend.addEventListener("touchstart", event => event.preventDefault(), { passive: false });
+      clonedBar.addEventListener("click", focusAction);
+      clonedBar.addEventListener("pointerup", focusAction, { passive: false });
+      clonedBar.addEventListener("touchend", focusAction, { passive: false });
+
+      positionFloatingControls();
+      answerInput.focus({ preventScroll: true });
+      return true;
+    }
+
+    function positionFloatingControls() {
+      if (floatingControls.hidden || !activeSvg || !floatingGroup || !floatingBarRect || !floatingSendRect) return;
+      const viewport = window.visualViewport;
+      const visibleTop = viewport ? viewport.offsetTop : 0;
+      const visibleBottom = visibleTop + (viewport ? viewport.height : window.innerHeight);
+      const unionBottom = Math.max(floatingBarRect.bottom, floatingSendRect.bottom);
+      const shiftPixels = visibleBottom - 16 - unionBottom;
+      const matrix = activeSvg.getScreenCTM();
+      const scaleY = matrix && matrix.d ? Math.abs(matrix.d) : 1;
+      floatingGroup.setAttribute("transform", `translate(0 ${shiftPixels / scaleY})`);
+
+      floatingControls.style.top = "0px";
+      floatingControls.style.left = "0px";
+      floatingControls.style.width = `${window.innerWidth}px`;
+      floatingControls.style.height = `${window.innerHeight}px`;
+
+      answerInput.style.left = `${floatingBarRect.left}px`;
+      answerInput.style.top = `${floatingBarRect.top + shiftPixels}px`;
+      answerInput.style.width = `${floatingBarRect.width}px`;
+      answerInput.style.height = `${floatingBarRect.height}px`;
+      answerInput.style.fontSize = `${Math.max(16, Math.min(30, floatingBarRect.height * 0.48))}px`;
+    }
+
+    function openAnswerField() {
+      if (createFloatingControls()) requestAnimationFrame(positionFloatingControls);
+    }
+
+    function submitAnswer() {
+      if (!activeSvg || !activeAnswerScreen) return;
+      const screen = activeAnswerScreen;
+      const expected = EXPECTED_LETTERS.get(screen);
+      if (!expected) return;
+      const answer = answerInput.value.trim().toUpperCase();
+      if (answer === expected) {
+        closeFloatingControls();
+        goToScreen(screen + 1);
+      } else {
+        stage.classList.remove("shake");
+        void stage.offsetWidth;
+        stage.classList.add("shake");
+        answerInput.focus({ preventScroll: true });
+        answerInput.select();
+        showStatus("Esa no es la letra. Inténtalo otra vez.");
+      }
+    }
+
+    function configureScreen(svg, number) {
+      if ([3, 4, 13].includes(number)) {
+        const button = findLayer(svg, "Boton_Siguiente") ||
+          (number === 3 ? findLayerInElements(svg, "Simbolo_Caraval") : null);
+        bindAction(button, `Siguiente_Pantalla_${number}`, () => goToScreen(number + 1));
+      }
+      if (number >= 5 && number <= 10) {
+        bindAction(findLayer(svg, "Boton_Barra"), `Barra_Pantalla_${number}`, openAnswerField);
+        bindAction(findLayer(svg, "Boton_Enviar"), `Enviar_Pantalla_${number}`, openAnswerField);
+      }
+    }
+
+    function parseSvg(source, number) {
+      const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
+      if (parsed.querySelector("parsererror") || parsed.documentElement.localName !== "svg") {
+        throw new Error(`${fileName(number)} contiene XML no válido.`);
+      }
+      const svg = document.importNode(parsed.documentElement, true);
+      svg.dataset.screen = String(number);
+      svg.setAttribute("preserveAspectRatio", svg.getAttribute("preserveAspectRatio") || "xMidYMid meet");
+      return svg;
+    }
+
+    async function goToScreen(number) {
+      if (number < 1 || number > TOTAL_SCREENS || navigationLock) return;
+      navigationLock = true;
+      clearAutoTimer();
+      closeFloatingControls();
+      try {
+        const oldSvg = activeSvg;
+        const seamless = currentScreen === 2 && number === 3;
+        const source = await getSvgText(number);
+        const nextSvg = parseSvg(source, number);
+        releaseSvgText(number);
+        nextSvg.classList.add("is-active");
+        nextSvg.style.opacity = seamless || !oldSvg ? "1" : "0";
+        stage.appendChild(nextSvg);
+        configureScreen(nextSvg, number);
+        activeSvg = nextSvg;
+        currentScreen = number;
+
+        if (oldSvg) {
+          oldSvg.style.pointerEvents = "none";
+          if (seamless) {
+            oldSvg.remove();
+            nextSvg.style.transition = "none";
+            nextSvg.style.opacity = "1";
+            requestAnimationFrame(() => nextSvg.style.removeProperty("transition"));
+          } else {
+            oldSvg.classList.add("is-leaving");
+            requestAnimationFrame(() => { nextSvg.style.opacity = "1"; });
+            await new Promise(resolve => setTimeout(resolve, FADE_MS));
+            oldSvg.remove();
+          }
+        }
+        // La pantalla actual ya está visible: prepara la siguiente sin bloquearla.
+        scheduleNextPrefetch(number);
+
+        const delay = AUTO_ADVANCE.get(number);
+        if (delay) autoTimer = setTimeout(() => goToScreen(number + 1), delay);
+      } catch (error) {
+        showError(location.protocol === "file:"
+          ? "Abre el juego desde un servidor local para que el navegador pueda cargar los SVG."
+          : `No se pudo abrir ${fileName(number)}. ${error.message}`);
+      } finally {
+        navigationLock = false;
+      }
+    }
+
+    answerInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") { event.preventDefault(); submitAnswer(); }
+    });
+    answerInput.addEventListener("blur", () => {
+      if (!navigationLock && !floatingControls.hidden) closeFloatingControls({ blur: false, clearValue: false });
+    });
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", positionFloatingControls, { passive: true });
+      window.visualViewport.addEventListener("scroll", positionFloatingControls, { passive: true });
+    }
+    window.addEventListener("orientationchange", () => setTimeout(positionFloatingControls, 250), { passive: true });
+    stage.addEventListener("animationend", event => {
+      if (event.animationName === "gentle-shake") stage.classList.remove("shake");
+    });
+
+    const initialLoader = document.getElementById("initial-loader");
+
+    retryButton.addEventListener("click", async () => {
+      hideError();
+      if (initialLoader) initialLoader.classList.remove("hidden");
+      try {
+        if (currentScreen) {
+          await goToScreen(currentScreen);
+        } else {
+          await startGame();
+        }
+      } catch (error) {
+        showError(error.message);
+      }
+    });
+
+    async function startGame() {
+      if (location.protocol === "file:") {
+        if (initialLoader) initialLoader.classList.add("hidden");
+        showError("Abre el juego desde un servidor local para que el navegador pueda cargar los SVG.");
+        return;
+      }
+
+      try {
+        // Prioridad absoluta: descargar, parsear y mostrar únicamente Pantalla_1.
+        const firstSource = await getSvgText(1);
+        const firstSvg = parseSvg(firstSource, 1);
+        releaseSvgText(1);
+        firstSvg.classList.add("is-active");
+        stage.appendChild(firstSvg);
+        activeSvg = firstSvg;
+        currentScreen = 1;
+        configureScreen(firstSvg, 1);
+
+        // Retira el indicador tan pronto como el primer SVG está montado.
+        if (initialLoader) initialLoader.classList.add("hidden");
+
+        // Pantallas 2 y 3 se solicitan enseguida, en paralelo y sin bloquear la vista.
+        prefetchScreen(2);
+        prefetchScreen(3);
+
+        const delay = AUTO_ADVANCE.get(1);
+        if (delay) autoTimer = setTimeout(() => goToScreen(2), delay);
+      } catch (error) {
+        if (initialLoader) initialLoader.classList.add("hidden");
+        showError(location.protocol === "file:"
+          ? "Abre el juego desde un servidor local para que el navegador pueda cargar los SVG."
+          : `No se pudo abrir ${fileName(1)}. ${error.message}`);
+      }
+    }
+    startGame();
+  })();
+  </script>
+</body>
+</html>
